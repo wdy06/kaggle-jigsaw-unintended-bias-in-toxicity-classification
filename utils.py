@@ -74,7 +74,7 @@ def load_data():
     test = pd.read_csv(os.path.join(JIGSAW_PATH,'test.csv'), index_col='id')
     return train, test
 
-def perform_preprocessing(train, test):
+def preprocess_text(df):
     logger.info('data preprocessing')
     
     # adding preprocessing from this kernel: https://www.kaggle.com/taindow/simple-cudnngru-python-keras
@@ -87,18 +87,15 @@ def perform_preprocessing(train, test):
             text = text.replace(p, f' {p} ')     
         return text
 
-    for df in [train, test]:
-        df[COMMENT_TEXT_COL] = df[COMMENT_TEXT_COL].astype(str)
-        df[COMMENT_TEXT_COL] = df[COMMENT_TEXT_COL].apply(lambda x: clean_special_chars(x, punct, punct_mapping))
+    df[COMMENT_TEXT_COL] = df[COMMENT_TEXT_COL].astype(str)
+    df[COMMENT_TEXT_COL] = df[COMMENT_TEXT_COL].apply(lambda x: clean_special_chars(x, punct, punct_mapping))
     
-    return train, test
+    return df
 
 
-def run_tokenizer(train, test, num_words, seq_len):
+def run_tokenizer(tokenizer, train, test, seq_len):
     logger.info('Fitting tokenizer')
-    tokenizer = Tokenizer(num_words=num_words, lower=True) 
     tokenizer.fit_on_texts(list(train[COMMENT_TEXT_COL]) + list(test[COMMENT_TEXT_COL]))
-    word_index = tokenizer.word_index
     X_train = tokenizer.texts_to_sequences(list(train[COMMENT_TEXT_COL]))
     y_train = np.where(train['target'] >= 0.5, 1, 0)
     X_test = tokenizer.texts_to_sequences(list(test[COMMENT_TEXT_COL]))
@@ -106,9 +103,7 @@ def run_tokenizer(train, test, num_words, seq_len):
     X_train = pad_sequences(X_train, maxlen=seq_len)
     X_test = pad_sequences(X_test, maxlen=seq_len)
     
-    del tokenizer
-    gc.collect()
-    return X_train, X_test, y_train, word_index
+    return X_train, X_test, y_train
 
 def build_embeddings(word_index, emb_max_feat):
     logger.info('Load and build embeddings')

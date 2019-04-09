@@ -65,9 +65,11 @@ def main():
     train_data = ToxicDataset(mode='train', debug=args.debug)
     test_data = ToxicDataset(mode='test')
     train, test = train_data.data, test_data.data
-    train, test = utils.perform_preprocessing(train, test)
-    X_train, X_test, y_train, word_index = utils.run_tokenizer(train, test, 
-                                                               num_words=MAX_FEATURES,
+    train = utils.preprocess_text(train)
+    test = utils.preprocess_text(test)
+    tokenizer = Tokenizer(num_words=MAX_FEATURES, lower=True)
+    word_index = tokenizer.word_index
+    X_train, X_test, y_train = utils.run_tokenizer(tokenizer, train, test, 
                                                                seq_len=MAX_LEN)
     embedding_matrix = utils.build_embeddings(word_index, emb_max_feat=EMB_MAX_FEAT)
     sub_preds = utils.run_model(X_train, X_test, y_train, embedding_matrix, word_index,
