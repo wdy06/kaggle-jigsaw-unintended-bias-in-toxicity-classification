@@ -123,8 +123,9 @@ def run_model(X_train, X_test, y_train, embedding_matrix, word_index,
     for fold_, (trn_idx, val_idx) in enumerate(folds.split(X_train, y_train)):
         
         #K.clear_session()
-        check_point = ModelCheckpoint(f'mod_{fold_}.hdf5', save_best_only = True)
-        early_stopping = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=3)
+        check_point = ModelCheckpoint(f'model_{fold_}.hdf5', save_best_only = True, 
+                                      verbose=1, monitor='val_loss', mode='min')
+        early_stopping = EarlyStopping(monitor='val_loss', mode='min', patience=5)
         model = modelutils.build_model(embedding_matrix, word_index, max_len, lstm_units)
         model.fit(X_train[trn_idx],
             y_train[trn_idx],
