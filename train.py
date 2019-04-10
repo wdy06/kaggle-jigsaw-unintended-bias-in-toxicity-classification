@@ -65,8 +65,8 @@ def main():
     train_data = ToxicDataset(mode='train', debug=args.debug)
     test_data = ToxicDataset(mode='test')
     train, test = train_data.data, test_data.data
-    train = utils.preprocess_text(train)
-    test = utils.preprocess_text(test)
+    train = utils.preprocess_data(train, mode='train')
+    test = utils.preprocess_data(test)
     tokenizer = Tokenizer(num_words=MAX_FEATURES, lower=True)
     word_index = tokenizer.word_index
     X_train, X_test, y_train = utils.run_tokenizer(tokenizer, train, test, 

@@ -74,21 +74,42 @@ def load_data():
     test = pd.read_csv(os.path.join(JIGSAW_PATH,'test.csv'), index_col='id')
     return train, test
 
-def preprocess_text(df):
+def preprocess_data(df, mode=None):
     logger.info('data preprocessing')
     
     # adding preprocessing from this kernel: https://www.kaggle.com/taindow/simple-cudnngru-python-keras
+    # List all identities
+    identity_columns = [
+        'male', 'female', 'homosexual_gay_or_lesbian', 'christian', 'jewish',
+        'muslim', 'black', 'white', 'psychiatric_or_mental_illness']
     punct_mapping = {"_":" ", "`":" "}
     punct = "/-'?!.,#$%\'()*+-/:;<=>@[\\]^_`{|}~" + '""“”’' + '∞θ÷α•à−β∅³π‘₹´°£€\×™√²—–&'
-    def clean_special_chars(text, punct, mapping):
+    def _clean_special_chars(text, punct, mapping):
         for p in mapping:
             text = text.replace(p, mapping[p])    
         for p in punct:
             text = text.replace(p, f' {p} ')     
         return text
+    # List all identities
+    identity_columns = [
+        'male', 'female', 'homosexual_gay_or_lesbian', 'christian', 'jewish',
+        'muslim', 'black', 'white', 'psychiatric_or_mental_illness']
+
+    # Convert taget and identity columns to booleans
+    def _convert_to_bool(df, col_name):
+        df[col_name] = np.where(df[col_name] >= 0.5, True, False)
+
+    def _convert_dataframe_to_bool(df):
+        bool_df = df.copy()
+        for col in ['target'] + identity_columns:
+            print(col)
+            _convert_to_bool(bool_df, col)
+        return bool_df
 
     df[COMMENT_TEXT_COL] = df[COMMENT_TEXT_COL].astype(str)
-    df[COMMENT_TEXT_COL] = df[COMMENT_TEXT_COL].apply(lambda x: clean_special_chars(x, punct, punct_mapping))
+    df[COMMENT_TEXT_COL] = df[COMMENT_TEXT_COL].apply(lambda x: _clean_special_chars(x, punct, punct_mapping))
+    if mode == 'train':
+        df = _convert_dataframe_to_bool(df)
     
     return df
 
