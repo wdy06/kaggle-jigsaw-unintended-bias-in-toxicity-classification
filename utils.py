@@ -14,7 +14,7 @@ import keras.layers as L
 from keras.models import Model
 from keras.optimizers import Adam
 from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import KFold
+from sklearn.model_selection import StratifiedKFold
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 
@@ -115,7 +115,7 @@ def build_embeddings(word_index, emb_max_feat):
 def run_model(X_train, X_test, y_train, embedding_matrix, word_index, 
               batch_size, epochs, max_len, lstm_units):
     logger.info('Prepare folds')
-    folds = KFold(n_splits=5, random_state=42)
+    folds = StratifiedKFold(n_splits=5, random_state=42)
     oof_preds = np.zeros((X_train.shape[0]))
     sub_preds = np.zeros((X_test.shape[0]))
     
