@@ -24,7 +24,7 @@ import argparse
 import pandas as pd 
 import gc
 import logging
-import datetime
+from datetime import datetime
 import warnings
 from tqdm import tqdm
 tqdm.pandas()
@@ -58,10 +58,8 @@ def main():
     BATCH_SIZE = 1024
     NUM_EPOCHS = 10
     LSTM_UNITS = 64
-    
     if args.debug:
         print('running in debug mode')
-    
     train_data = ToxicDataset(mode='train', debug=args.debug)
     test_data = ToxicDataset(mode='test')
     train, test = train_data.data, test_data.data
@@ -72,9 +70,18 @@ def main():
     X_train, X_test, y_train = utils.run_tokenizer(tokenizer, train, test, 
                                                                seq_len=MAX_LEN)
     embedding_matrix = utils.build_embeddings(word_index, emb_max_feat=EMB_MAX_FEAT)
-    sub_preds = utils.run_model(X_train, X_test, y_train, embedding_matrix, word_index,
-                                batch_size=BATCH_SIZE, epochs=NUM_EPOCHS, 
-                                max_len=MAX_LEN, lstm_units=LSTM_UNITS)
+    sub_preds, oof_df = utils.run_model(X_train, X_test, y_train, embedding_matrix, 
+                                        word_index, batch_size=BATCH_SIZE, epochs=NUM_EPOCHS, 
+                                        max_len=MAX_LEN, lstm_units=LSTM_UNITS, oof_df=train)
+    bias_metrics_df = utils.compute_bias_metrics_for_model(oof_df, 
+                                                           utils.IDENTITY_COLS,
+                                                           utils.PREDICT_COL, 
+                                                           utils.TOXICITY_COLUMN)
+    validation_final_socre = utils.get_final_metric(bias_metrics_df, 
+                                                    utils.calculate_overall_auc(oof_df, 
+                                                                          utils.TOXICITY_COLUMN)
+                                                   )
+    print(f'validation final score: {validation_final_socre}')
     utils.submit(sub_preds)
     
 if __name__ == "__main__":
