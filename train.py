@@ -60,6 +60,13 @@ def main():
     LSTM_UNITS = 64
     if args.debug:
         print('running in debug mode')
+    if args.debug:
+        result_dir = os.path.join(utils.RESULT_DIR, 'debug-'+datetime.strftime(datetime.now(), '%Y%m%d%H%M%S'))
+    else:
+        result_dir = os.path.join(utils.RESULT_DIR, datetime.strftime(datetime.now(), '%Y%m%d%H%M%S'))
+    os.mkdir(result_dir)
+    print(f'created: {result_dir}')
+
     train_data = ToxicDataset(mode='train', debug=args.debug)
     test_data = ToxicDataset(mode='test')
     train, test = train_data.data, test_data.data
@@ -70,7 +77,7 @@ def main():
     X_train, X_test, y_train = utils.run_tokenizer(tokenizer, train, test, 
                                                                seq_len=MAX_LEN)
     embedding_matrix = utils.build_embeddings(word_index, emb_max_feat=EMB_MAX_FEAT)
-    sub_preds, oof_df = utils.run_model(X_train, X_test, y_train, embedding_matrix, 
+    sub_preds, oof_df = utils.run_model(result_dir, X_train, X_test, y_train, embedding_matrix, 
                                         word_index, batch_size=BATCH_SIZE, epochs=NUM_EPOCHS, 
                                         max_len=MAX_LEN, lstm_units=LSTM_UNITS, oof_df=train)
     bias_metrics_df = utils.compute_bias_metrics_for_model(oof_df, 
@@ -82,7 +89,7 @@ def main():
                                                                           utils.TOXICITY_COLUMN)
                                                    )
     print(f'validation final score: {validation_final_socre}')
-    utils.submit(sub_preds)
+    utils.submit(result_dir, sub_preds)
     
 if __name__ == "__main__":
     main()

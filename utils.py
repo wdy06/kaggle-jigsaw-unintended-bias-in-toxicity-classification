@@ -24,6 +24,7 @@ from models import modelutils
 DIR_PATH = os.path.dirname(os.path.abspath(__file__))
 TRAIN_PATH = os.path.join(DIR_PATH, 'data/train.csv')
 TEST_PATH = os.path.join(DIR_PATH, 'data/test.csv')
+RESULT_DIR = os.path.join(DIR_PATH, 'results')
 SAMPLE_SUB_PATH = os.path.join(DIR_PATH, 'data/sample_submission.csv')
 
 EMB_PATHS = [
@@ -137,7 +138,7 @@ def build_embeddings(word_index, emb_max_feat):
     return embedding_matrix
 
 
-def run_model(X_train, X_test, y_train, embedding_matrix, word_index, 
+def run_model(result_dir, X_train, X_test, y_train, embedding_matrix, word_index, 
               batch_size, epochs, max_len, lstm_units, oof_df):
     logger.info('Prepare folds')
     folds = StratifiedKFold(n_splits=5, random_state=42)
@@ -148,7 +149,7 @@ def run_model(X_train, X_test, y_train, embedding_matrix, word_index,
     for fold_, (trn_idx, val_idx) in enumerate(folds.split(X_train, y_train)):
         
         #K.clear_session()
-        check_point = ModelCheckpoint(f'model_{fold_}.hdf5', save_best_only = True, 
+        check_point = ModelCheckpoint(os.path.join(result_dir, f'model_{fold_}.hdf5'), save_best_only = True, 
                                       verbose=1, monitor='val_loss', mode='min')
         early_stopping = EarlyStopping(monitor='val_loss', mode='min', patience=5)
         model = modelutils.build_model(embedding_matrix, word_index, max_len, lstm_units)
@@ -168,12 +169,12 @@ def run_model(X_train, X_test, y_train, embedding_matrix, word_index,
     return sub_preds, oof_df
 
 
-def submit(sub_preds):
+def submit(result_dir, sub_preds):
     logger.info('Prepare submission')
     submission = pd.read_csv(SAMPLE_SUB_PATH, index_col='id')
     submission['prediction'] = sub_preds
     submission.reset_index(drop=False, inplace=True)
-    submission.to_csv('submission.csv', index=False)
+    submission.to_csv(os.path.join(result_dir,'submission.csv'), index=False)
     
 
 def compute_auc(y_true, y_pred):
