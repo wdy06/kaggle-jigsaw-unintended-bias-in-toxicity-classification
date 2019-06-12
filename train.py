@@ -55,7 +55,8 @@ def main():
     EMB_MAX_FEAT = 300
     MAX_LEN = 220
     MAX_FEATURES = 100000
-    BATCH_SIZE = 1024
+    #BATCH_SIZE = 1024
+    BATCH_SIZE = 2048*2
     NUM_EPOCHS = 10
     LSTM_UNITS = 64
     if args.debug:

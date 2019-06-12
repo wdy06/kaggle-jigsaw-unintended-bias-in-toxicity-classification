@@ -11,10 +11,12 @@ from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 
 from .attention import Attention
+from .model_multi_gpu import ModelMGPU
+
 
 
 def build_model(embedding_matrix, word_index, max_len, lstm_units, 
-                verbose = False, compile = True):
+                verbose = False, compile = True, multi=True, gpu_num=4):
     #logger.info('Build model')
     sequence_input = L.Input(shape=(max_len,), dtype='int32')
     embedding_layer = L.Embedding(*embedding_matrix.shape,
@@ -30,6 +32,9 @@ def build_model(embedding_matrix, word_index, max_len, lstm_units,
     x = L.concatenate([att,avg_pool1, max_pool1])
     preds = L.Dense(1, activation='sigmoid')(x)
     model = Model(sequence_input, preds)
+    if multi:
+        print('use multi gpus')
+        model = ModelMGPU(model, gpus=gpu_num)
     if verbose:
         model.summary()
     if compile:
