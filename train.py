@@ -74,23 +74,27 @@ def main():
     train = utils.preprocess_data(train, mode='train')
     test = utils.preprocess_data(test)
     tokenizer = Tokenizer(num_words=MAX_FEATURES, lower=True)
-    word_index = tokenizer.word_index
     X_train, X_test, y_train = utils.run_tokenizer(tokenizer, train, test, 
                                                                seq_len=MAX_LEN)
+    word_index = tokenizer.word_index
+    #print(word_index)
+    print(f'vocab size: {len(word_index)}')
     embedding_matrix = utils.build_embeddings(word_index, emb_max_feat=EMB_MAX_FEAT)
-    sub_preds, oof_df = utils.run_model(result_dir, X_train, X_test, y_train, embedding_matrix, 
+    print(embedding_matrix.shape)
+    sub_preds, oof_df = utils.run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, 
                                         word_index, batch_size=BATCH_SIZE, epochs=NUM_EPOCHS, 
                                         max_len=MAX_LEN, lstm_units=LSTM_UNITS, oof_df=train)
-    bias_metrics_df = utils.compute_bias_metrics_for_model(oof_df, 
-                                                           utils.IDENTITY_COLS,
-                                                           utils.PREDICT_COL, 
-                                                           utils.TOXICITY_COLUMN)
+    bias_metrics_df = utils.compute_bias_metrics_for_model(dataset=oof_df, 
+                                                           subgroups=utils.IDENTITY_COLS,
+                                                           model=utils.PREDICT_COL, 
+                                                           label_col=utils.TOXICITY_COLUMN)
     validation_final_socre = utils.get_final_metric(bias_metrics_df, 
                                                     utils.calculate_overall_auc(oof_df, 
                                                                           utils.TOXICITY_COLUMN)
                                                    )
     print(f'validation final score: {validation_final_socre}')
     utils.submit(result_dir, sub_preds)
+    print('finish!!!')
     
 if __name__ == "__main__":
     main()

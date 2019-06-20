@@ -2,9 +2,11 @@ import io
 import os
 import numpy as np
 import pandas as pd
+import pickle
 import logging
 import gc
 from tqdm import tqdm
+from collections import OrderedDict
 
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras import backend as K
@@ -17,8 +19,13 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
+import torch
+from torch import nn
+from torch.utils import data
+from torch.nn import functional as F
 
 from models import modelutils
+from models.model_pytorch import SimpleLSTM
 
 
 DIR_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -28,8 +35,8 @@ RESULT_DIR = os.path.join(DIR_PATH, 'results')
 SAMPLE_SUB_PATH = os.path.join(DIR_PATH, 'data/sample_submission.csv')
 
 EMB_PATHS = [
-    os.path.join(DIR_PATH, 'data/crawl-300d-2M.vec'),
-    os.path.join(DIR_PATH, 'data/glove.840B.300d.txt')
+    os.path.join(DIR_PATH, 'data/crawl-300d-2M.vec.pkl'),
+    os.path.join(DIR_PATH, 'data/glove.840B.300d.txt.pkl')
 ]
 
 # List all identities
@@ -54,6 +61,14 @@ def get_logger():
 
 logger = get_logger()
 
+def load_pickle(path):
+    with open(path, 'rb') as f:
+        pickle_data = pickle.load(f)
+    return pickle_data
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
 def get_coefs(word, *arr):
     return word, np.asarray(arr, dtype='float32')
 
@@ -65,7 +80,8 @@ def load_embeddings(path):
 
 
 def build_embedding_matrix(word_index, path, emb_max_feat):
-    embedding_index = load_embeddings(path)
+#     embedding_index = load_embeddings(path)
+    embedding_index = load_pickle(path)
     embedding_matrix = np.zeros((len(word_index) + 1, emb_max_feat))
     for word, i in word_index.items():
         try:
@@ -79,6 +95,11 @@ def build_embedding_matrix(word_index, path, emb_max_feat):
     gc.collect()
     return embedding_matrix
 
+def build_embeddings(word_index, emb_max_feat):
+    logger.info('Load and build embeddings')
+    embedding_matrix = np.concatenate(
+        [build_embedding_matrix(word_index, f, emb_max_feat) for f in EMB_PATHS], axis=-1) 
+    return embedding_matrix
 
 def load_data():
     logger.info('Load train and test data')
@@ -131,12 +152,6 @@ def run_tokenizer(tokenizer, train, test, seq_len):
     
     return X_train, X_test, y_train
 
-def build_embeddings(word_index, emb_max_feat):
-    logger.info('Load and build embeddings')
-    embedding_matrix = np.concatenate(
-        [build_embedding_matrix(word_index, f, emb_max_feat) for f in EMB_PATHS], axis=-1) 
-    return embedding_matrix
-
 
 def run_model(result_dir, X_train, X_test, y_train, embedding_matrix, word_index, 
               batch_size, epochs, max_len, lstm_units, oof_df):
@@ -148,7 +163,6 @@ def run_model(result_dir, X_train, X_test, y_train, embedding_matrix, word_index
     logger.info('Run model')
     for fold_, (trn_idx, val_idx) in enumerate(folds.split(X_train, y_train)):
         
-        #K.clear_session()
         check_point = ModelCheckpoint(os.path.join(result_dir, f'model_{fold_}.hdf5'), save_best_only = True, 
                                       verbose=1, monitor='val_loss', mode='min')
         early_stopping = EarlyStopping(monitor='val_loss', mode='min', patience=5)
@@ -168,6 +182,94 @@ def run_model(result_dir, X_train, X_test, y_train, embedding_matrix, word_index
     logger.info('Complete run model')
     return sub_preds, oof_df
 
+def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, word_index, 
+              batch_size, epochs, max_len, lstm_units, oof_df):
+    logger.info('Prepare folds')
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.device_count() > 1:
+        print("Let's use", torch.cuda.device_count(), "GPUs!")
+    folds = StratifiedKFold(n_splits=5, random_state=42)
+    oof_preds = np.zeros((X_train.shape[0]))
+    sub_preds = np.zeros((X_test.shape[0]))
+    
+    logger.info('Run model')
+    for fold_, (trn_idx, val_idx) in tqdm(enumerate(folds.split(X_train, y_train))):
+        model = SimpleLSTM(embedding_matrix)
+        model = torch.nn.DataParallel(model)
+        model.to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        
+        print(f'fold: {fold_}')
+        x_train_torch = torch.tensor(X_train[trn_idx], dtype=torch.long).to(device)
+        y_train_torch = torch.tensor(y_train[trn_idx, np.newaxis], dtype=torch.float32).to(device)
+        x_val_torch = torch.tensor(X_train[val_idx], dtype=torch.long).to(device)
+        y_val_torch = torch.tensor(y_train[val_idx, np.newaxis], dtype=torch.float32).to(device)
+        
+        train_dataset = torch.utils.data.TensorDataset(x_train_torch, y_train_torch)
+        val_dataset = torch.utils.data.TensorDataset(x_val_torch, y_val_torch)
+        
+        train_loader = torch.utils.data.DataLoader(train_dataset,
+                                                   batch_size=batch_size,
+                                                   shuffle=True)
+        val_loader = torch.utils.data.DataLoader(val_dataset,
+                                                 batch_size=batch_size,
+                                                 shuffle=False)
+        best_val_score = 1000000
+        save_path = os.path.join(result_dir, f'model_fold{fold_}')
+        for epoch in tqdm(range(epochs)):
+            model.train()
+            avg_loss = 0.
+            # train
+            for data, target in tqdm(train_loader):
+                data, target = data.to(device), target.to(device)
+                optimizer.zero_grad()
+                y_pred = model(data)
+                loss_func = nn.BCEWithLogitsLoss(reduction='mean')
+                loss = loss_func(y_pred, target)
+                loss.backward()
+                optimizer.step()
+                avg_loss += loss.item() / len(train_loader)
+
+            # validation
+            model.eval()
+            avg_val_loss = 0.
+            valid_preds_fold = np.zeros(len(val_dataset))
+            for i, (data, target) in enumerate(val_loader):
+                with torch.no_grad():
+                    y_pred = model(data).detach()
+
+                avg_val_loss += loss_func(y_pred, target).item() / len(val_loader)
+                valid_preds_fold[i * batch_size:(i + 1) * batch_size] = sigmoid(y_pred.cpu().numpy())[:, 0]
+            print(f'epoch {epoch+1} / {epochs}, loss: {avg_loss}, val_loss: {avg_val_loss}')
+            is_best = bool(avg_val_loss < best_val_score)
+            if is_best:
+                best_val_score = avg_val_loss
+                print(f'update best score !! current best score: {best_val_score} !!')
+            save_checkpoint(model, is_best, save_path)
+        
+        oof_preds[val_idx] = valid_preds_fold
+        
+    
+    oof_df[PREDICT_COL] = oof_preds
+    # inference test data with fold averaging
+    print(f'predicting test data ...')
+    x_test_torch = torch.tensor(X_test, dtype=torch.long).to(device)
+    test_dataset = torch.utils.data.TensorDataset(x_test_torch)
+    test_loader = torch.utils.data.DataLoader(test_dataset,
+                                              batch_size=batch_size,
+                                              shuffle=False)
+    test_preds = np.zeros(len(X_test))
+    for fold_ in range(folds.n_splits):
+        model = load_pytorch_model(os.path.join(result_dir, f'model_fold{fold_}'), embedding_matrix)
+        model = torch.nn.DataParallel(model)
+        model.to(device)
+        for i, (data,) in enumerate(test_loader):
+            with torch.no_grad():
+                y_pred = model(data).detach()
+            test_preds[i * batch_size:(i + 1) * batch_size] += sigmoid(y_pred.cpu().numpy()[:,0])
+    test_preds /= folds.n_splits
+    logger.info('Complete run model')
+    return test_preds, oof_df
 
 def submit(result_dir, sub_preds):
     logger.info('Prepare submission')
@@ -236,3 +338,36 @@ def get_final_metric(bias_df, overall_auc, POWER=-5, OVERALL_MODEL_WEIGHT=0.25):
         power_mean(bias_df[BNSP_AUC], POWER)
     ])
     return (OVERALL_MODEL_WEIGHT * overall_auc) + ((1 - OVERALL_MODEL_WEIGHT) * bias_score)
+
+
+def save_pytorch_model(model, path):
+    torch.save(model.state_dict(), path)
+    
+def load_pytorch_model(path, *args, **kwargs):
+    state_dict = torch.load(path)
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        name = k[7:] # remove `module.`
+        new_state_dict[name] = v
+    model = SimpleLSTM(*args, **kwargs)
+    model.load_state_dict(new_state_dict)
+    return model
+
+
+def save_checkpoint(model, is_best, path):
+    """Save checkpoint if a new best is achieved"""
+    if is_best:
+        print (f"=> Saving a new best to {path}")
+        save_pytorch_model(model, path)  # save checkpoint
+    else:
+        print ("=> Validation Accuracy did not improve")
+
+
+
+
+
+
+
+
+
+
