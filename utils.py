@@ -24,6 +24,9 @@ from torch import nn
 from torch.utils import data
 from torch.nn import functional as F
 
+from pytorch_pretrained_bert import convert_tf_checkpoint_to_pytorch
+from pytorch_pretrained_bert import BertTokenizer, BertForSequenceClassification,BertAdam
+
 from models import modelutils
 from models.model_pytorch import SimpleLSTM
 
@@ -152,6 +155,30 @@ def run_tokenizer(tokenizer, train, test, seq_len):
     
     return X_train, X_test, y_train
 
+def convert_lines(example, max_seq_length,tokenizer):
+    # Converting the lines to BERT format
+    max_seq_length -=2
+    all_tokens = []
+    longer = 0
+    for text in tqdm(example):
+        tokens_a = tokenizer.tokenize(text)
+        if len(tokens_a)>max_seq_length:
+            tokens_a = tokens_a[:max_seq_length]
+            longer += 1
+        one_token = tokenizer.convert_tokens_to_ids(["[CLS]"]+tokens_a+["[SEP]"])+[0] * (max_seq_length - len(tokens_a))
+        all_tokens.append(one_token)
+    print(longer)
+    return np.array(all_tokens)
+
+def run_bert_tokenizer(tokenizer, train, test, seq_len):
+    logger.info('use bert tokenizer')
+#     X_train = convert_lines(train["comment_text"] , seq_len, tokenizer)
+    X_train = load_pickle('./data/X_train_tokenized.pkl')
+    X_test = convert_lines(test["comment_text"] , seq_len, tokenizer)
+    
+    y_train = np.where(train['target'] >= 0.5, 1, 0)
+    
+    return X_train, X_test, y_train
 
 def run_model(result_dir, X_train, X_test, y_train, embedding_matrix, word_index, 
               batch_size, epochs, max_len, lstm_units, oof_df):
@@ -194,10 +221,21 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
     
     logger.info('Run model')
     for fold_, (trn_idx, val_idx) in tqdm(enumerate(folds.split(X_train, y_train))):
-        model = SimpleLSTM(embedding_matrix)
+        #model = SimpleLSTM(embedding_matrix)
+        model = BertForSequenceClassification.from_pretrained('bert-base-uncased', 
+                                                              num_labels=1)
         model = torch.nn.DataParallel(model)
         model.to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        #optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+        param_optimizer = list(model.named_parameters())
+        no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 
+             'weight_decay': 0.01},
+            {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 
+             'weight_decay': 0.0}
+            ]
+        optimizer = BertAdam(optimizer_grouped_parameters, lr=0.001)
         
         print(f'fold: {fold_}')
         x_train_torch = torch.tensor(X_train[trn_idx], dtype=torch.long).to(device)
@@ -253,10 +291,11 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
     oof_df[PREDICT_COL] = oof_preds
     # inference test data with fold averaging
     print(f'predicting test data ...')
+    test_batch_size = int(batch_size/2)
     x_test_torch = torch.tensor(X_test, dtype=torch.long).to(device)
     test_dataset = torch.utils.data.TensorDataset(x_test_torch)
     test_loader = torch.utils.data.DataLoader(test_dataset,
-                                              batch_size=batch_size,
+                                              batch_size=int(test_batch_size),
                                               shuffle=False)
     test_preds = np.zeros(len(X_test))
     for fold_ in range(folds.n_splits):
@@ -266,7 +305,7 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
         for i, (data,) in enumerate(test_loader):
             with torch.no_grad():
                 y_pred = model(data).detach()
-            test_preds[i * batch_size:(i + 1) * batch_size] += sigmoid(y_pred.cpu().numpy()[:,0])
+            test_preds[i * test_batch_size:(i + 1) * test_batch_size] += sigmoid(y_pred.cpu().numpy()[:,0])
     test_preds /= folds.n_splits
     logger.info('Complete run model')
     return test_preds, oof_df
@@ -349,7 +388,9 @@ def load_pytorch_model(path, *args, **kwargs):
     for k, v in state_dict.items():
         name = k[7:] # remove `module.`
         new_state_dict[name] = v
-    model = SimpleLSTM(*args, **kwargs)
+    #model = SimpleLSTM(*args, **kwargs)
+    model = BertForSequenceClassification.from_pretrained('bert-base-uncased', 
+                                                          num_labels=1)
     model.load_state_dict(new_state_dict)
     return model
 

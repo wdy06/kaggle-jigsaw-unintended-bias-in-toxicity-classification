@@ -40,6 +40,9 @@ from sklearn.model_selection import KFold
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 
+from pytorch_pretrained_bert import convert_tf_checkpoint_to_pytorch
+from pytorch_pretrained_bert import BertTokenizer, BertForSequenceClassification,BertAdam
+
 import utils
 from dataset import ToxicDataset
 
@@ -56,8 +59,10 @@ def main():
     MAX_LEN = 220
     MAX_FEATURES = 100000
     #BATCH_SIZE = 1024
-    BATCH_SIZE = 2048*2
-    NUM_EPOCHS = 10
+    BATCH_SIZE = 128
+    
+    #BATCH_SIZE = 2048
+    NUM_EPOCHS = 1
     LSTM_UNITS = 64
     if args.debug:
         print('running in debug mode')
@@ -73,14 +78,18 @@ def main():
     train, test = train_data.data, test_data.data
     train = utils.preprocess_data(train, mode='train')
     test = utils.preprocess_data(test)
-    tokenizer = Tokenizer(num_words=MAX_FEATURES, lower=True)
-    X_train, X_test, y_train = utils.run_tokenizer(tokenizer, train, test, 
+    #tokenizer = Tokenizer(num_words=MAX_FEATURES, lower=True)
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', 
+                                              do_lower_case=True)
+    X_train, X_test, y_train = utils.run_bert_tokenizer(tokenizer, train, test, 
                                                                seq_len=MAX_LEN)
-    word_index = tokenizer.word_index
+    #word_index = tokenizer.word_index
+    word_index = None
     #print(word_index)
-    print(f'vocab size: {len(word_index)}')
-    embedding_matrix = utils.build_embeddings(word_index, emb_max_feat=EMB_MAX_FEAT)
-    print(embedding_matrix.shape)
+#    print(f'vocab size: {len(word_index)}')
+#     embedding_matrix = utils.build_embeddings(word_index, emb_max_feat=EMB_MAX_FEAT)
+#     print(embedding_matrix.shape)
+    embedding_matrix = None
     sub_preds, oof_df = utils.run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, 
                                         word_index, batch_size=BATCH_SIZE, epochs=NUM_EPOCHS, 
                                         max_len=MAX_LEN, lstm_units=LSTM_UNITS, oof_df=train)
