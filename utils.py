@@ -26,6 +26,7 @@ from torch.nn import functional as F
 
 from pytorch_pretrained_bert import convert_tf_checkpoint_to_pytorch
 from pytorch_pretrained_bert import BertTokenizer, BertForSequenceClassification,BertAdam
+from apex import amp
 
 from models import modelutils
 from models.model_pytorch import SimpleLSTM
@@ -36,6 +37,9 @@ TRAIN_PATH = os.path.join(DIR_PATH, 'data/train.csv')
 TEST_PATH = os.path.join(DIR_PATH, 'data/test.csv')
 RESULT_DIR = os.path.join(DIR_PATH, 'results')
 SAMPLE_SUB_PATH = os.path.join(DIR_PATH, 'data/sample_submission.csv')
+BERT_MODEL_PATH = os.path.join(DIR_PATH, 
+                               'data/uncased_L-12_H-768_A-12/')
+BERT_MODEL_CONFIG = os.path.join(BERT_MODEL_PATH, 'bert_config.json')
 
 EMB_PATHS = [
     os.path.join(DIR_PATH, 'data/crawl-300d-2M.vec.pkl'),
@@ -222,7 +226,7 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
     logger.info('Run model')
     for fold_, (trn_idx, val_idx) in tqdm(enumerate(folds.split(X_train, y_train))):
         #model = SimpleLSTM(embedding_matrix)
-        model = BertForSequenceClassification.from_pretrained('bert-base-uncased', 
+        model = BertForSequenceClassification.from_pretrained(BERT_MODEL_PATH, 
                                                               num_labels=1)
         model = torch.nn.DataParallel(model)
         model.to(device)
@@ -261,7 +265,7 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
             for data, target in tqdm(train_loader):
                 data, target = data.to(device), target.to(device)
                 optimizer.zero_grad()
-                y_pred = model(data)
+                y_pred = model(data, attention_mask=(data>0).to(device), labels=None)
                 loss_func = nn.BCEWithLogitsLoss(reduction='mean')
                 loss = loss_func(y_pred, target)
                 loss.backward()
@@ -274,7 +278,7 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
             valid_preds_fold = np.zeros(len(val_dataset))
             for i, (data, target) in enumerate(val_loader):
                 with torch.no_grad():
-                    y_pred = model(data).detach()
+                    y_pred = model(data, attention_mask=(data>0).to(device), labels=None).detach()
 
                 avg_val_loss += loss_func(y_pred, target).item() / len(val_loader)
                 valid_preds_fold[i * batch_size:(i + 1) * batch_size] = sigmoid(y_pred.cpu().numpy())[:, 0]
@@ -300,11 +304,12 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
     test_preds = np.zeros(len(X_test))
     for fold_ in range(folds.n_splits):
         model = load_pytorch_model(os.path.join(result_dir, f'model_fold{fold_}'), embedding_matrix)
+        model.eval()
         model = torch.nn.DataParallel(model)
         model.to(device)
         for i, (data,) in enumerate(test_loader):
             with torch.no_grad():
-                y_pred = model(data).detach()
+                y_pred = model(data, attention_mask=(data>0).to(device), labels=None).detach()
             test_preds[i * test_batch_size:(i + 1) * test_batch_size] += sigmoid(y_pred.cpu().numpy()[:,0])
     test_preds /= folds.n_splits
     logger.info('Complete run model')
@@ -389,7 +394,7 @@ def load_pytorch_model(path, *args, **kwargs):
         name = k[7:] # remove `module.`
         new_state_dict[name] = v
     #model = SimpleLSTM(*args, **kwargs)
-    model = BertForSequenceClassification.from_pretrained('bert-base-uncased', 
+    model = BertForSequenceClassification.from_pretrained(BERT_MODEL_PATH, 
                                                           num_labels=1)
     model.load_state_dict(new_state_dict)
     return model

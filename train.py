@@ -73,13 +73,17 @@ def main():
     os.mkdir(result_dir)
     print(f'created: {result_dir}')
 
+#     convert_tf_checkpoint_to_pytorch.convert_tf_checkpoint_to_pytorch(
+#         os.path.join(utils.BERT_MODEL_PATH, 'bert_model.ckpt'),
+#         os.path.join(utils.BERT_MODEL_PATH, 'bert_config.json'),
+#         utils.PYTORCH_BERT_MODEL_PATH)
     train_data = ToxicDataset(mode='train', debug=args.debug)
     test_data = ToxicDataset(mode='test')
     train, test = train_data.data, test_data.data
     train = utils.preprocess_data(train, mode='train')
     test = utils.preprocess_data(test)
     #tokenizer = Tokenizer(num_words=MAX_FEATURES, lower=True)
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', 
+    tokenizer = BertTokenizer.from_pretrained(utils.BERT_MODEL_PATH, 
                                               do_lower_case=True)
     X_train, X_test, y_train = utils.run_bert_tokenizer(tokenizer, train, test, 
                                                                seq_len=MAX_LEN)
