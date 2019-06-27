@@ -59,7 +59,7 @@ def main():
     MAX_LEN = 220
     MAX_FEATURES = 100000
     #BATCH_SIZE = 1024
-    BATCH_SIZE = 128
+    BATCH_SIZE = 256
     
     #BATCH_SIZE = 2048
     NUM_EPOCHS = 1

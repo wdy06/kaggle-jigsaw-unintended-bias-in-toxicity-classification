@@ -217,6 +217,7 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
               batch_size, epochs, max_len, lstm_units, oof_df):
     logger.info('Prepare folds')
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    torch.cuda.set_device(device)
     if torch.cuda.device_count() > 1:
         print("Let's use", torch.cuda.device_count(), "GPUs!")
     folds = StratifiedKFold(n_splits=5, random_state=42)
@@ -228,7 +229,7 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
         #model = SimpleLSTM(embedding_matrix)
         model = BertForSequenceClassification.from_pretrained(BERT_MODEL_PATH, 
                                                               num_labels=1)
-        model = torch.nn.DataParallel(model)
+        #model = torch.nn.DataParallel(model)
         model.to(device)
         #optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         param_optimizer = list(model.named_parameters())
@@ -240,6 +241,8 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
              'weight_decay': 0.0}
             ]
         optimizer = BertAdam(optimizer_grouped_parameters, lr=0.001)
+        model, optimizer = amp.initialize(model, optimizer, opt_level="O1",verbosity=0)
+        model = torch.nn.DataParallel(model)
         
         print(f'fold: {fold_}')
         x_train_torch = torch.tensor(X_train[trn_idx], dtype=torch.long).to(device)
@@ -268,7 +271,9 @@ def run_model_pytorch(result_dir, X_train, X_test, y_train, embedding_matrix, wo
                 y_pred = model(data, attention_mask=(data>0).to(device), labels=None)
                 loss_func = nn.BCEWithLogitsLoss(reduction='mean')
                 loss = loss_func(y_pred, target)
-                loss.backward()
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+                #loss.backward()
                 optimizer.step()
                 avg_loss += loss.item() / len(train_loader)
 
